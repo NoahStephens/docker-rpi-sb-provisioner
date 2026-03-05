@@ -53,6 +53,20 @@ WORKDIR /usr/src
 RUN set -eux; \
     git clone --depth 1 --branch "${RPI_SB_PROVISIONER_GIT_REF}" https://github.com/raspberrypi/rpi-sb-provisioner.git source; \
     test "$(git -C source rev-parse HEAD)" = "${RPI_SB_PROVISIONER_GIT_COMMIT}"; \
+    # Prevent cross-arch/debian hardening flags from leaking into CMake during multi-platform buildx runs.
+    unset \
+      CFLAGS \
+      CXXFLAGS \
+      CPPFLAGS \
+      LDFLAGS \
+      DEB_BUILD_ARCH \
+      DEB_HOST_ARCH \
+      DEB_TARGET_ARCH \
+      DEB_BUILD_MAINT_OPTIONS \
+      DEB_CFLAGS_MAINT_APPEND \
+      DEB_CXXFLAGS_MAINT_APPEND \
+      DEB_CPPFLAGS_MAINT_APPEND \
+      DEB_LDFLAGS_MAINT_APPEND; \
     cmake -S source/provisioner-service -B /tmp/build -DCMAKE_BUILD_TYPE=Release; \
     cmake --build /tmp/build --parallel "$(nproc)"; \
     cmake --install /tmp/build; \
