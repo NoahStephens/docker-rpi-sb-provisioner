@@ -1,0 +1,17 @@
+{
+  "2.2": {
+    "version": "2.2.0",
+    "gitRef": "v2.2.0",
+    "gitCommit": "ca1d4e2ba7f59e2c0cf0a11902c0587796129bc4",
+    "defaultVariant": "bookworm",
+    "variants": {
+      "bookworm": {
+        "baseImage": "debian:bookworm-slim",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ]
+      }
+    }
+  }
+}

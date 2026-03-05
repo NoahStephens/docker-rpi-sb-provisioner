@@ -1,0 +1,19 @@
+name: verify-templating
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regenerate templated files
+        run: ./apply-templates.sh
+
+      - name: Check for drift
+        run: git diff --exit-code

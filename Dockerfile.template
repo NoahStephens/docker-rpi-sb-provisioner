@@ -1,0 +1,79 @@
+FROM %%BASE_IMAGE%%
+
+LABEL org.opencontainers.image.title="rpi-sb-provisioner" \
+      org.opencontainers.image.description="Container image for Raspberry Pi secure-boot provisioning tooling" \
+      org.opencontainers.image.url="https://github.com/raspberrypi/rpi-sb-provisioner" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+ARG RPI_SB_PROVISIONER_VERSION="%%FULL_VERSION%%"
+ARG RPI_SB_PROVISIONER_GIT_REF="%%GIT_REF%%"
+ARG RPI_SB_PROVISIONER_GIT_COMMIT="%%GIT_COMMIT%%"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RPI_SB_PROVISIONER_VERSION="${RPI_SB_PROVISIONER_VERSION}"
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      bash \
+      build-essential \
+      ca-certificates \
+      cmake \
+      cpio \
+      curl \
+      dbus \
+      git \
+      gnutls-bin \
+      iputils-ping \
+      jq \
+      libsqlite3-0 \
+      libsqlite3-dev \
+      sqlite3 \
+      libssl-dev \
+      libsystemd-dev \
+      libsystemd0 \
+      openssl \
+      pkg-config \
+      python3 \
+      python3-pycryptodome \
+      tini \
+      uuid-dev \
+      zlib1g-dev \
+      xxd; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src
+
+RUN set -eux; \
+    git clone --depth 1 --branch "${RPI_SB_PROVISIONER_GIT_REF}" https://github.com/raspberrypi/rpi-sb-provisioner.git source; \
+    test "$(git -C source rev-parse HEAD)" = "${RPI_SB_PROVISIONER_GIT_COMMIT}"; \
+    cmake -S source/provisioner-service -B /tmp/build -DCMAKE_BUILD_TYPE=Release; \
+    cmake --build /tmp/build --parallel "$(nproc)"; \
+    cmake --install /tmp/build; \
+    install -d /usr/share/rpi-sb-provisioner /etc/rpi-sb-provisioner /srv/rpi-sb-provisioner/images /srv/rpi-sb-provisioner/work /var/log/rpi-sb-provisioner; \
+    cp source/host-support/config /usr/share/rpi-sb-provisioner/config.default; \
+    cp source/service/*.sh /usr/local/bin/; \
+    cp source/fetch-repo-package-list/fetch-repo-package-list /usr/local/bin/; \
+    cp source/rpi-package-download/rpi-package-download /usr/local/bin/; \
+    chmod +x /usr/local/bin/rpi-*.sh /usr/local/bin/fetch-repo-package-list /usr/local/bin/rpi-package-download; \
+    rm -rf /tmp/build /usr/src/source
+
+RUN set -eux; \
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -Eeuo pipefail' \
+      'if [ "${*: -1}" = "rpi-sb-provisioner" ]; then' \
+      '  printf "%s\n" "${RPI_SB_PROVISIONER_VERSION:-0.0.0}"' \
+      '  exit 0' \
+      'fi' \
+      'exec /usr/bin/dpkg-query "$@"' \
+      > /usr/local/bin/dpkg-query; \
+    chmod +x /usr/local/bin/dpkg-query
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 3142 3143
+VOLUME ["/etc/rpi-sb-provisioner", "/srv/rpi-sb-provisioner", "/var/log/rpi-sb-provisioner"]
+
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
+CMD ["rpi-provisioner-ui", "--address", "0.0.0.0", "--disable-https"]
