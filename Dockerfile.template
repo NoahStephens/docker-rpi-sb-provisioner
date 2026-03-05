@@ -47,6 +47,10 @@ WORKDIR /usr/src
 RUN set -eux; \
     git clone --depth 1 --branch "${RPI_SB_PROVISIONER_GIT_REF}" https://github.com/raspberrypi/rpi-sb-provisioner.git source; \
     test "$(git -C source rev-parse HEAD)" = "${RPI_SB_PROVISIONER_GIT_COMMIT}"; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    if [ "$dpkgArch" != "arm64" ]; then \
+      sed -i 's/ -mbranch-protection=standard//g' source/provisioner-service/cmake/RaspberryPiHardening.cmake; \
+    fi; \
     # Prevent cross-arch/debian hardening flags from leaking into CMake during multi-platform buildx runs.
     unset \
       CFLAGS \
