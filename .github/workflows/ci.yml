@@ -2,6 +2,16 @@ name: ci
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build and publish (for example v2.2.0)
+        required: false
+        type: string
+      push_images:
+        description: Push built images when manually dispatching the workflow
+        required: false
+        default: false
+        type: boolean
   pull_request:
   push:
     branches:
@@ -9,6 +19,9 @@ on:
       - master
     tags:
       - "v*.*.*"
+  release:
+    types:
+      - published
   schedule:
     - cron: "0 5 * * *"
 
@@ -32,9 +45,11 @@ jobs:
 
       - name: Build matrix from versions.json
         id: matrix
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event_name == 'release' && github.event.release.tag_name || startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           matrix_json="$(
-            jq -c '
+            jq -c --arg releaseTag "$RELEASE_TAG" '
               def splitNum: split(".") | map(tonumber);
               def topVersion: (keys | sort_by(splitNum) | last);
               . as $doc
@@ -43,6 +58,7 @@ jobs:
                   to_entries[]
                   | .key as $version
                   | .value as $entry
+                  | select($releaseTag == "" or $entry.gitRef == $releaseTag or ("v" + $entry.version) == $releaseTag)
                   | ($version | split(".")[0]) as $major
                   | $entry.variants
                   | to_entries[]
@@ -78,6 +94,12 @@ jobs:
                 ]
             ' versions.json
           )"
+
+          if [ -n "$RELEASE_TAG" ] && [ "$(jq 'length' <<<"$matrix_json")" -eq 0 ]; then
+            echo "error: no versions.json entry matches release tag $RELEASE_TAG" >&2
+            exit 1
+          fi
+
           printf 'matrix={"include":%s}\n' "$matrix_json" >> "$GITHUB_OUTPUT"
           jq . <<<"$matrix_json"
 
@@ -93,6 +115,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Decide whether to push images
+        id: publish
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
+          DISPATCH_PUSH_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.push_images || 'false' }}
+        run: |
+          should_push=false
+          if [ "$EVENT_NAME" = "release" ] || [[ "$REF" == refs/tags/v* ]]; then
+            should_push=true
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_PUSH_IMAGES" = "true" ] && [ -n "$RELEASE_TAG" ]; then
+            should_push=true
+          fi
+          echo "should_push=$should_push" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -100,7 +138,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: steps.publish.outputs.should_push == 'true'
         uses: docker/login-action@v3
         with:
           registry: docker.io
@@ -108,7 +146,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: steps.publish.outputs.should_push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -142,7 +180,7 @@ jobs:
           context: ${{ matrix.directory }}
           file: ${{ matrix.directory }}/Dockerfile
           platforms: ${{ matrix.platforms }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ steps.publish.outputs.should_push == 'true' }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
